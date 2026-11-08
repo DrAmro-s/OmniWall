@@ -1377,7 +1377,10 @@ html, body {
 <!-- Looks & Styling Modal -->
 <div id="looks-modal" class="modal-window">
   <div class="modal-header" id="looks-modal-header">
-    <span>Tile Looks & Styling</span>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span>Tile Looks & Styling</span>
+      <button class="btn-action-small" id="btn-looks-scope" onclick="toggleLooksScope()" style="background: var(--accent); font-weight: 700; padding: 3px 10px; font-size: 11px;" title="Toggle between applying to ALL tiles or only TARGET (selected) tiles">Scope: ALL</button>
+    </div>
     <button class="tile-btn" onclick="document.getElementById('looks-modal').style.display='none'">✕</button>
   </div>
   
@@ -3101,8 +3104,39 @@ function applyCardLooks(card) {
   }
 }
 
+let looksScopeMode = 'all'; // Default: 'all'
+
+function updateLooksScopeBtnUI() {
+  const btn = document.getElementById('btn-looks-scope');
+  if (!btn) return;
+  if (looksScopeMode === 'all') {
+    btn.innerHTML = 'Scope: <b>ALL</b>';
+    btn.style.background = 'var(--accent)';
+    btn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+    btn.style.color = '#fff';
+    btn.title = 'Currently modifying ALL tiles. Click to switch to Target (Selected only).';
+  } else {
+    btn.innerHTML = 'Scope: <b>TARGET</b>';
+    btn.style.background = 'rgba(255, 255, 255, 0.08)';
+    btn.style.borderColor = 'rgba(255, 255, 255, 0.18)';
+    btn.style.color = '#cbd5e1';
+    btn.title = 'Currently modifying TARGET (selected) tiles only. Click to switch to All.';
+  }
+}
+
+function toggleLooksScope() {
+  looksScopeMode = (looksScopeMode === 'all') ? 'target' : 'all';
+  updateLooksScopeBtnUI();
+  if (looksScopeMode === 'all') {
+    updateLiveLooks();
+    showToast("Looks Scope: ALL Tiles (Overrides all)");
+  } else {
+    showToast("Looks Scope: Target (Selected Tiles Only)");
+  }
+}
+
 function openLooksModal() {
-  const target = getTargetCards()[0] || state.cards[0];
+  const target = (looksScopeMode === 'target') ? (getTargetCards()[0] || state.cards[0]) : (state.cards[0] || getTargetCards()[0]);
   const l = (target && target.looks) ? target.looks : defaultLooks;
 
   document.getElementById('looks-radius').value = l.rounded;
@@ -3130,11 +3164,12 @@ function openLooksModal() {
   document.getElementById('looks-shadow-op').value = l.shadowOpacity;
   document.getElementById('looks-shadow-op-val').innerText = Math.round(l.shadowOpacity * 100) + '%';
 
+  updateLooksScopeBtnUI();
   looksModal.style.display = 'flex';
 }
 
 function updateLiveLooks() {
-  const targets = getTargetCards();
+  const targets = (looksScopeMode === 'all') ? state.cards : getTargetCards();
   const current = {
     rounded: parseInt(document.getElementById('looks-radius').value),
     strokeOn: document.getElementById('btn-toggle-stroke').innerText.includes('ON'),
@@ -4371,6 +4406,15 @@ function spawnVideoTile(fileList, x, y, restoredData = null, initialLoopMode = '
     if (v && v.duration && !isNaN(v.duration)) seekbar.max = v.duration;
   }
 
+  function syncSeekbarUI(v) {
+    if (!v) return;
+    if (v.duration && !isNaN(v.duration)) {
+      if (seekbar.max !== String(v.duration)) seekbar.max = v.duration;
+    }
+    seekbar.value = v.currentTime;
+    timeDisplay.textContent = `${formatTime(v.currentTime)} / ${formatTime(v.duration || 0)}`;
+  }
+
   function autoAdaptRatio(vElement) {
     if (cardObj.isLocked) return;
     const vw = vElement.videoWidth, vh = vElement.videoHeight;
@@ -4537,14 +4581,19 @@ function spawnVideoTile(fileList, x, y, restoredData = null, initialLoopMode = '
     });
 
     vid.addEventListener('timeupdate', () => {
-      if (vid === activeVid && !vid.paused) {
-        if (seekbar.max !== String(vid.duration) && vid.duration) seekbar.max = vid.duration;
-        seekbar.value = vid.currentTime;
-        timeDisplay.textContent = `${formatTime(vid.currentTime)} / ${formatTime(vid.duration)}`;
+      if (vid === activeVid) {
+        syncSeekbarUI(vid);
+      }
+    });
+
+    vid.addEventListener('seeked', () => {
+      if (vid === activeVid) {
+        syncSeekbarUI(vid);
       }
     });
   });
 
+  cardObj.syncSeekbar = () => syncSeekbarUI(activeVid);
   cardObj.preloadStandby = preloadStandby;
   cardObj.jumpToTrack = jumpToTrack;
   cardObj.updatePlayBtn = (isPlaying) => { playBtn.textContent = isPlaying ? '⏸' : '▶'; };
@@ -4579,7 +4628,10 @@ function spawnVideoTile(fileList, x, y, restoredData = null, initialLoopMode = '
   });
 
   playBtn.onclick = (e) => { e.stopPropagation(); cardObj.togglePlay(); };
-  seekbar.oninput = (e) => { activeVid.currentTime = e.target.value; };
+  seekbar.oninput = (e) => {
+    activeVid.currentTime = parseFloat(e.target.value);
+    syncSeekbarUI(activeVid);
+  };
   volbar.oninput = (e) => { cardObj.setVolume(parseFloat(e.target.value)); };
   opacbar.oninput = (e) => { card.style.opacity = e.target.value; };
   hud.querySelector('.btn-open-modal').onclick = (e) => { e.stopPropagation(); openPlaylistBrowser(cardObj); };
@@ -5882,7 +5934,10 @@ window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === '0') {
     e.preventDefault();
     applyToSelected(c => {
-      if (c.type === 'video') c.getActiveMedia().currentTime = 0;
+      if (c.type === 'video') {
+        c.getActiveMedia().currentTime = 0;
+        if (c.syncSeekbar) c.syncSeekbar();
+      }
     });
     return;
   }
@@ -5980,6 +6035,7 @@ window.addEventListener('keydown', (e) => {
           v.currentTime = targetTime;
         }
       }
+      if (card.syncSeekbar) card.syncSeekbar();
     });
     return;
   }
