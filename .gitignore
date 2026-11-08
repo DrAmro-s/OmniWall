@@ -1,0 +1,13 @@
+# Exclude the 159 MB compiled application folder
+OmniWall-win32-x64/
+out/
+dist/
+build/
+
+# Node dependencies
+node_modules/
+
+# OS and system caches
+Thumbs.db
+.DS_Store
+*.log
